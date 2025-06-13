@@ -1,6 +1,8 @@
 # RAG Chatbot Workflow (n8n)
 
 This project is an automated **RAG-based chatbot** workflow built in [n8n](https://n8n.io/). It uses **retrieval-augmented generation** to fetch relevant documents and generate conversational answers with source attribution.
+
+read the readme.txt file 
 ##  RUN
 
 Initailly run the src files and then in the go to the workflow 

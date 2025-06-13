@@ -1,0 +1,5 @@
+[
+  {"query": "What is the return policy?", "expected": "Our return policy allows you to return products within 30 days..."},
+  {"query": "How can I contact customer support?", "expected": "You can contact our customer support team by phone..."},
+  {"query": "", "expected": "Sorry, query is empty."}
+]

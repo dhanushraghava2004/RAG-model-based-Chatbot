@@ -1,0 +1,408 @@
+{
+  "name": "RAG Chatbot",
+  "nodes": [
+    {
+      "parameters": {
+        "jsCode": "// Error Response Handler\nconst input = $input.first().json;\n\n// Create user-friendly error response\nconst errorResponse = {\n  response: `I apologize, but I encountered an issue while processing your request: ${input.message || 'Something went wrong'}. Please try rephrasing your question or contact support if the problem persists.`,\n  error: true,\n  timestamp: input.timestamp || new Date().toISOString()\n};\n\nreturn [{ json: errorResponse }];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1540,
+        -520
+      ],
+      "id": "044a4cab-7750-4332-867c-8018e0f7b427",
+      "name": "Error Response"
+    },
+    {
+      "parameters": {
+        "operation": "write",
+        "fileName": "logs/chatbot.log",
+        "dataPropertyName": "=data:{{new Date().toISOString()}}: Query: {{$node['Code3'].json.query}}, Response: {{$json.response}}, Status: ERROR",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.readWriteFile",
+      "typeVersion": 1,
+      "position": [
+        1740,
+        -520
+      ],
+      "id": "098527ab-e993-43f6-844e-43dab5b42f9c",
+      "name": "Error Log"
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{$json.response}}",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.4,
+      "position": [
+        1960,
+        -520
+      ],
+      "id": "10b46a85-3a6c-4821-a4fe-5185fc2e10c3",
+      "name": "Error Webhook Response"
+    },
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "/webhook",
+        "responseMode": "responseNode",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [
+        -360,
+        -400
+      ],
+      "id": "387f7fd1-7e84-4759-8fa6-c1a9c75c9a0f",
+      "name": "Webhook1",
+      "webhookId": "105eeae4-6f46-4b46-8051-c4f40024bca3"
+    },
+    {
+      "parameters": {
+        "jsCode": "const query = $input.first().json.body.query.trim().toLowerCase();\nif (!query) throw new Error(\"Query is empty\");\nreturn [{ json: { query } }];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -140,
+        -400
+      ],
+      "id": "a5af76af-62db-4cd3-8104-3ce477804db0",
+      "name": "Code3"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "http://127.0.0.1:5000/search",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\"query\": \"{{$node['Code3'].json.query}}\"}",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        100,
+        -660
+      ],
+      "id": "3cabe024-8bea-4bfb-bc00-23936eb2fe6c",
+      "name": "HTTP Request1"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "=https://api.mistral.ai/v1/chat/completions",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpBearerAuth",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\n  \"model\": \"mistral-small-latest\",\n  \"messages\": [\n    {\n      \"role\": \"user\",\n      \"content\": \"{{ $node['Code4'].json.prompt.replace(/\\n/g, '\\\\n') }}\"\n    }\n  ],\n  \"temperature\": 0.7,\n  \"top_p\": 1,\n  \"max_tokens\": 500,\n  \"stream\": false\n}\n",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        520,
+        -400
+      ],
+      "id": "eca7f6b1-2ff5-498e-b184-1f4522c01a79",
+      "name": "Generation Node1",
+      "credentials": {
+        "httpBearerAuth": {
+          "id": "SXjySwNm9KMy5L2o",
+          "name": "Bearer Auth Mistral AI"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "const query = $('Code3').first().json.query;\nconst documents = $input.first().json.documents;\nconst ids = $input.first().json.ids;\nif (!documents || documents.length === 0) {\n    throw new Error(\"No relevant documents found\");\n}\nlet context = documents.map((doc, i) => `Document ${ids[i]}: ${doc}`).join(\"\\n\\n\");\nconst prompt = `You are a helpful FAQ chatbot. Using the following context, answer the query concisely and accurately. Attribute the source documents in your response.\\n\\nContext:\\n${context}\\n\\nQuery: ${query}\\n\\nAnswer:`;\nreturn [{ json: { prompt, ids } }];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        300,
+        -400
+      ],
+      "id": "cfa36180-bfaf-4aa6-b5e6-5e0d1eca054b",
+      "name": "Code4"
+    },
+    {
+      "parameters": {
+        "jsCode": "try {\n  // Get Generation node's output\n  const items = $input.all();\n\n  // Ensure there's at least one item\n  if (!items.length) {\n    return [{ json: { error: true, message: 'No input from Generation node' } }];\n  }\n\n  // Get answer from Generation node\n  const generationOutput = items[0]?.json;\n  const answer = generationOutput?.choices?.[0]?.message?.content;\n  \n  if (!answer) {\n    return [{ json: { error: true, message: 'No response content found in Generation output' } }];\n  }\n\n  // Get ids from Code1 node\n  const code1Output = $('Code4').first()?.json;\n  const ids = code1Output?.ids;\n  \n  if (!ids || !Array.isArray(ids)) {\n    return [{ json: { error: true, message: 'No valid IDs found from Code1 node' } }];\n  }\n\n  // Format successful response\n  const response = `${answer.trim()}\\n\\n**Source Documents**: ${ids.join(\", \")}`;\n\n  // Return formatted output with success flag\n  return [{ json: { response, success: true,error: false, timestamp: new Date().toISOString() } }];\n  \n} catch (error) {\n  // Return error object instead of throwing\n  return [{ json: { error: true, message: `Processing error: ${error.message}`, timestamp: new Date().toISOString() } }];\n}"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        740,
+        -400
+      ],
+      "id": "d4f01b13-cde2-4e57-8327-f1051aac8d73",
+      "name": "Code5",
+      "alwaysOutputData": true
+    },
+    {
+      "parameters": {
+        "rules": {
+          "values": [
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "loose",
+                  "version": 2
+                },
+                "conditions": [
+                  {
+                    "leftValue": "={{ $json.error }}",
+                    "rightValue": true,
+                    "operator": {
+                      "type": "boolean",
+                      "operation": "equal"
+                    },
+                    "id": "d93adb33-1062-43da-9543-979878f141b6"
+                  }
+                ],
+                "combinator": "and"
+              },
+              "renameOutput": true,
+              "outputKey": "error"
+            },
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "loose",
+                  "version": 2
+                },
+                "conditions": [
+                  {
+                    "id": "7c4ec927-9254-4c91-bae8-465b9387e11c",
+                    "leftValue": "={{ $json.error }}",
+                    "rightValue": false,
+                    "operator": {
+                      "type": "boolean",
+                      "operation": "equals"
+                    }
+                  }
+                ],
+                "combinator": "and"
+              }
+            }
+          ]
+        },
+        "looseTypeValidation": true,
+        "options": {}
+      },
+      "type": "n8n-nodes-base.switch",
+      "typeVersion": 3.2,
+      "position": [
+        960,
+        -400
+      ],
+      "id": "fa282bf1-3835-4a79-9b33-e3eb69f49c94",
+      "name": "Switch1"
+    },
+    {
+      "parameters": {
+        "operation": "write",
+        "fileName": "logs/chatbot.log",
+        "dataPropertyName": "=data",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.readWriteFile",
+      "typeVersion": 1,
+      "position": [
+        1540,
+        -300
+      ],
+      "id": "06f117b5-85b0-4a4b-b537-06af7ecffcd7",
+      "name": "Read/Write Files from Disk1"
+    },
+    {
+      "parameters": {
+        "respondWith": "binary",
+        "responseDataSource": "={{ $json.fileName }}",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.4,
+      "position": [
+        1760,
+        -300
+      ],
+      "id": "d8bc98be-6f61-4ad7-9af1-647d548be7e3",
+      "name": "Respond to Webhook1"
+    },
+    {
+      "parameters": {
+        "jsCode": "const logText = `${new Date().toISOString()}: Query: ${$node[\"Code3\"].json.query}, Response: ${$json.response}, Status: ${$json.error ? 'ERROR' : 'SUCCESS'}`;\n\nreturn [\n  {\n    binary: {\n      data: {\n        data: Buffer.from(logText).toString(\"base64\"),\n        mimeType: \"text/plain\",\n        fileName: \"chatbot.log\",\n      },\n    },\n  },\n];\n"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1180,
+        -300
+      ],
+      "id": "7e362113-5585-44ae-9c09-d554b6c6f63a",
+      "name": "Code6"
+    }
+  ],
+  "pinData": {},
+  "connections": {
+    "Error Response": {
+      "main": [
+        [
+          {
+            "node": "Error Log",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Error Log": {
+      "main": [
+        [
+          {
+            "node": "Error Webhook Response",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Webhook1": {
+      "main": [
+        [
+          {
+            "node": "Code3",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Code3": {
+      "main": [
+        [
+          {
+            "node": "HTTP Request1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "HTTP Request1": {
+      "main": [
+        [
+          {
+            "node": "Code4",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Generation Node1": {
+      "main": [
+        [
+          {
+            "node": "Code5",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Code4": {
+      "main": [
+        [
+          {
+            "node": "Generation Node1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Code5": {
+      "main": [
+        [
+          {
+            "node": "Switch1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Switch1": {
+      "main": [
+        [
+          {
+            "node": "Error Response",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Code6",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Read/Write Files from Disk1": {
+      "main": [
+        [
+          {
+            "node": "Respond to Webhook1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Code6": {
+      "main": [
+        [
+          {
+            "node": "Read/Write Files from Disk1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": true,
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "versionId": "fb34e2d8-3eee-4ddb-92e9-3bfe050cbad8",
+  "meta": {
+    "instanceId": "154df26b41dbd63778d2fa3a8bc5b3eb5a1d39e9d8b76c49206b9ccd3790956c"
+  },
+  "id": "sP1bDUoNKbGi30GU",
+  "tags": []
+}
